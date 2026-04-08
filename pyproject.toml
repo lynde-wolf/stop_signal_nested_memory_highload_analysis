@@ -1,0 +1,58 @@
+[project]
+name = "stop_wm"
+version = "0.1.0"
+description = "Codebase for stop_wm experiment hosted on Prolific."
+readme = "README.md"
+authors = [
+    { name = "Logan Bennett", email = "logben@stanford.edu" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.2.3",
+    "pandas>=2.2.3",
+    "matplotlib>=3.10.0",
+    "codespell>=2.4.1",
+    "tomli>=2.2.1",
+    "seaborn>=0.13.2",
+    "scipy>=1.16.2",
+    "pathlib>=1.0.1",
+    "dotenv>=0.9.9",
+    "pingouin>=0.5.5",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "ipython>=8.32.0",
+    "python-dotenv>=1.0.1",
+    "pytest>=8.3.4",
+    "pre-commit>=4.2.0",
+]
+
+[project.scripts]
+preprocess = "stop_wm.serverExperimentalData:main"
+clean_shape = "stop_wm.clean_shape:main"
+subjectwise_metrics = "stop_wm.subjectwise_metrics:main"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+extend-include = ["*.ipynb"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+extend-select = ["E501", "W", "N", "R", "I"]
+
+[tool.pytest.ini_options]
+testpaths=['tests']
+
+[tool.pyright]
+exclude = ['.venv']
+venvPath = '.'
+venv = '.venv'
+
