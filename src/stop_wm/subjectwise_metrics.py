@@ -2,9 +2,6 @@
 # calls reshaped data csv, groups by prolific_id, and calculates the metrics
 # the output is a csv where row is a prolific_id and the columns are the metrics
 
-# Metrics for stop+wm include 3 levels of working memory load (wm0, wm2, wm4)
-# Simple stop is the non working memory trials
-
 # Core metrics:
 # prolific_id,
 # completion_date,
@@ -15,10 +12,9 @@
 # stop_fail_mean_rt,
 # min_SSD,max_SSD,mean_SSD,final_SSD
 
-# for WM metrics each level has the same stats + the following:
-# wm_rt_(wm0, wm2, wm4),
-# wm_omission_rate_(wm0, wm2, wm4),
-# wm_accuracy_(wm0, wm2, wm4)
+# For the WM block each load level gets the same stats plus:
+# wm_rt_<load>, wm_omission_rate_<load>, wm_accuracy_<load>.
+# Column names embed the actual load value (e.g. wm2, wm4, wm6 for E3).
 
 
 # ============================================================================
@@ -34,6 +30,11 @@ from stop_wm.config import ProjectConfig
 
 # Initialize config
 config = ProjectConfig()
+
+# WM set sizes for this experiment. Downstream modules (flag_to_exclude,
+# calculate_binomial_thresholds) import this so the load grid is defined
+# in exactly one place. E1/E2 used [0, 2, 4]; E3 uses [2, 4, 6].
+WM_LOADS = [2, 4, 6]
 
 # ============================================================================
 # Functions
@@ -106,10 +107,11 @@ def calculate_ssrt_integration(go_rts, go_omission_count, stop_success_rate, mea
     return ssrt
 
 
-def calculate_stop_signal_metrics(group):
+def calculate_stop_signal_metrics(group, participant_id=None):
     """Calculate the metrics for the stop signal task experiment."""
     # Extract participant info
-    participant_id = group['participant_id'].iloc[0]
+    if participant_id is None:
+        participant_id = group['participant_id'].iloc[0]
     
     # Extract completion date from filename pattern
     # The reshaped data doesn't have date, so we'll need to get it from somewhere else
@@ -167,7 +169,7 @@ def calculate_stop_signal_metrics(group):
 
     return pd.Series({
         'prolific_id': participant_id,
-        'completion_date': group['participant_id'].iloc[0],
+        'completion_date': participant_id,
         'go_choice_accuracy': go_accuracy,
         'go_mean_rt': go_mean_correct_rt,
         'go_omission_rate': go_omission_rate,
@@ -186,9 +188,10 @@ def calculate_stop_signal_metrics(group):
     })
 
 
-def calculate_wm_metrics(group):
+def calculate_wm_metrics(group, participant_id=None):
     """Calculate the metrics for the working memory task experiment."""
-    participant_id = group['participant_id'].iloc[0]
+    if participant_id is None:
+        participant_id = group['participant_id'].iloc[0]
 
     # Overall dual task metrics (all trials aggregated)
     dual_task_go_trials = group[group['stop_trial_SS_trial_type'] == 'go']
@@ -226,7 +229,7 @@ def calculate_wm_metrics(group):
 
     # Working memory load specific metrics
     wm_metrics = {}
-    for wm_load in [0, 2, 4]:
+    for wm_load in WM_LOADS:
         wm_trials = group[group['memory_trial_stimLength'] == wm_load]
 
         # Dual task go trials for this WM load
@@ -375,7 +378,7 @@ def calculate_wm_metrics(group):
     wm_metrics['n_go_trials_with_probe'] = n_go_trials_for_probe
 
     # Probe metrics by WM load
-    for wm_load in [0, 2, 4]:
+    for wm_load in WM_LOADS:
         wm_probe_trials = probe_trials[
             probe_trials['memory_trial_stimLength'] == wm_load]
         wm_probe_choice_correct = wm_probe_trials[
@@ -501,9 +504,11 @@ def extract_completion_dates(preprocessed_dir, task_name):
     participant_dates = {}
     
     for participant_dir in preprocessed_dir.iterdir():
+        if participant_dir.name == 'approved':
+            continue
         if not participant_dir.is_dir():
             continue
-            
+
         prolific_id = participant_dir.name
         
         # Look for task directory
@@ -528,53 +533,73 @@ def extract_completion_dates(preprocessed_dir, task_name):
 # ============================================================================
 # Main
 # ============================================================================
+COMBINED_CSV_PREFIX = 'all_participants_reshaped_data_'
+
+
+def _metrics_fn_for(task_name: str):
+    """Route a task name to the appropriate metrics function.
+
+    Tasks with 'wm' in the name use the WM metrics function; everything else
+    (e.g. simple stop-signal control) uses the stop-signal metrics function.
+    """
+    return calculate_wm_metrics if 'wm' in task_name.lower() else calculate_stop_signal_metrics
+
+
+def _compute_task_metrics(task_name, csv_path, preprocessed_dir, results_dir):
+    """Compute and save metrics for one combined trial-level CSV."""
+    fn = _metrics_fn_for(task_name)
+    print(f"Processing {task_name} with {fn.__name__}...")
+
+    data = pd.read_csv(csv_path)
+    if 'participant_id' not in data.columns:
+        print(f"  Skipping {task_name}: no participant_id column in {csv_path.name}")
+        return
+
+    dates = extract_completion_dates(preprocessed_dir, task_name)
+
+    rows = []
+    failed = []
+    for pid, group in data.groupby('participant_id'):
+        try:
+            rows.append(fn(group, participant_id=pid))
+        except Exception as exc:
+            failed.append((pid, exc))
+
+    if not rows:
+        print(f"  No metrics rows produced for {task_name}")
+        if failed:
+            print(f"  ({len(failed)} participants failed)")
+        return
+
+    metrics = pd.DataFrame(rows)
+    metrics['completion_date'] = metrics['prolific_id'].map(dates)
+
+    out_path = results_dir / f'{task_name}_metrics.csv'
+    metrics.to_csv(out_path, index=False)
+    print(f"  Saved {len(metrics)} participants -> {out_path}")
+    if failed:
+        print(f"  Skipped {len(failed)} participant(s) due to errors; "
+              f"first: {failed[0][0]} ({failed[0][1]})")
+
+
 def main():
-    """Main function to calculate the subjectwise metrics for the stop+wm experiment."""
-    # Define file paths
-    stop_signal_csv = (config.data_dir / "results" /
-                       "all_participants_reshaped_data_stop_signal.csv")
-    wm_task_csv = (config.data_dir / "results" /
-                   "all_participants_reshaped_data_stop_signal_wm_task.csv")
+    """Discover combined reshaped CSVs and compute metrics for each task."""
+    results_dir = config.results_dir
+    combined_files = sorted(results_dir.glob(f'{COMBINED_CSV_PREFIX}*.csv'))
 
-    # Extract completion dates from preprocessed data
-    print("Extracting completion dates...")
-    stop_signal_dates = extract_completion_dates(
-        config.preprocessed_data_dir, 'stop_signal')
-    wm_task_dates = extract_completion_dates(
-        config.preprocessed_data_dir, 'stop_signal_wm_task')
-    
-    # Process stop signal data
-    print("Processing stop signal data...")
-    stop_signal_data = pd.read_csv(stop_signal_csv)
-    stop_signal_metrics = (stop_signal_data.groupby('participant_id')
-                          .apply(calculate_stop_signal_metrics)
-                          .reset_index(drop=True))
-    
-    # Update completion dates
-    stop_signal_metrics['completion_date'] = stop_signal_metrics['prolific_id'].map(stop_signal_dates)
+    if not combined_files:
+        print(f"No '{COMBINED_CSV_PREFIX}*.csv' files found in {results_dir}. "
+              f"Run `clean_shape` first.")
+        return
 
-    # Save stop signal metrics
-    stop_signal_output = config.data_dir / "results" / "stop_signal_metrics.csv"
-    stop_signal_metrics.to_csv(stop_signal_output, index=False)
-    print(f"Stop signal metrics saved to: {stop_signal_output}")
+    print(f"Found {len(combined_files)} combined trial CSV(s) in {results_dir}")
+    for csv_path in combined_files:
+        task_name = csv_path.stem[len(COMBINED_CSV_PREFIX):]
+        _compute_task_metrics(
+            task_name, csv_path, config.active_preprocessed_dir(), results_dir,
+        )
 
-    # Process working memory task data
-    print("Processing working memory task data...")
-    wm_task_data = pd.read_csv(wm_task_csv)
-    wm_task_metrics = (wm_task_data.groupby('participant_id')
-                      .apply(calculate_wm_metrics)
-                      .reset_index(drop=True))
-    
-    # Update completion dates
-    wm_task_metrics['completion_date'] = wm_task_metrics['prolific_id'].map(wm_task_dates)
-
-    # Save working memory task metrics
-    wm_task_output = (config.data_dir / "results" /
-                     "stop_signal_wm_task_metrics.csv")
-    wm_task_metrics.to_csv(wm_task_output, index=False)
-    print(f"Working memory task metrics saved to: {wm_task_output}")
-
-    print("All metrics calculated successfully!")
+    print("All metrics calculated.")
 
 
 if __name__ == "__main__":

@@ -19,59 +19,71 @@ except ImportError:
 # ============================================================================
 # Functions
 # ============================================================================
+def _split_by_wm(paths: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split a list of task-named files into (stop_signal_like, wm_like).
+
+    A file is treated as WM-task if ``'wm'`` appears in its task-name stem.
+    Mirrors the routing used by ``subjectwise_metrics`` and ``flag_to_exclude``.
+    """
+    stop, wm = [], []
+    for p in paths:
+        (wm if 'wm' in p.stem.lower() else stop).append(p)
+    return stop, wm
+
+
 def load_metrics(results_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load and concatenate all discovered ``*_metrics.csv`` files.
+
+    Files with ``wm`` in the task name go into the WM DataFrame; everything
+    else goes into the simple-stop DataFrame. Already-flagged and post_qc
+    outputs are excluded.
     """
-    Load the full metrics CSV files.
+    candidates = [
+        p for p in sorted(results_dir.glob('*_metrics.csv'))
+        if '__flagged' not in p.name and 'post_qc' not in p.name
+    ]
+    stop_files, wm_files = _split_by_wm(candidates)
 
-    Args:
-        results_dir: Path to the results directory
+    if not stop_files or not wm_files:
+        raise FileNotFoundError(
+            f'Need at least one stop-signal and one WM metrics file in '
+            f'{results_dir}; found stop={[p.name for p in stop_files]}, '
+            f'wm={[p.name for p in wm_files]}.'
+        )
 
-    Returns:
-        Tuple of (stop_signal_metrics, stop_signal_wm_metrics) DataFrames
-    """
-    stop_metrics_path = results_dir / 'stop_signal_metrics.csv'
-    wm_metrics_path = results_dir / 'stop_signal_wm_task_metrics.csv'
+    stop_metrics = pd.concat([pd.read_csv(p) for p in stop_files], ignore_index=True)
+    wm_metrics = pd.concat([pd.read_csv(p) for p in wm_files], ignore_index=True)
 
-    stop_metrics = pd.read_csv(stop_metrics_path)
-    wm_metrics = pd.read_csv(wm_metrics_path)
-
-    print(f"Loaded {len(stop_metrics)} subjects from stop_signal_metrics.csv")
-    print(
-        f"Loaded {len(wm_metrics)} subjects from "
-        "stop_signal_wm_task_metrics.csv"
-    )
+    print(f"Loaded {len(stop_metrics)} subjects from "
+          f"{[p.name for p in stop_files]}")
+    print(f"Loaded {len(wm_metrics)} subjects from "
+          f"{[p.name for p in wm_files]}")
 
     return stop_metrics, wm_metrics
 
 
 def load_trial_data(results_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load and concatenate ``all_participants_reshaped_data_*.csv`` files.
+
+    Same WM-vs-stop routing as ``load_metrics``.
     """
-    Load the trial-level data CSV files.
+    candidates = sorted(results_dir.glob('all_participants_reshaped_data_*.csv'))
+    stop_files, wm_files = _split_by_wm(candidates)
 
-    Args:
-        results_dir: Path to the results directory
+    if not stop_files or not wm_files:
+        raise FileNotFoundError(
+            f'Need at least one stop-signal and one WM combined trial file in '
+            f'{results_dir}; found stop={[p.name for p in stop_files]}, '
+            f'wm={[p.name for p in wm_files]}.'
+        )
 
-    Returns:
-        Tuple of (stop_signal_trials, wm_task_trials) DataFrames
-    """
-    stop_trials_path = (
-        results_dir / 'all_participants_reshaped_data_stop_signal.csv'
-    )
-    wm_trials_path = (
-        results_dir / 'all_participants_reshaped_data_stop_signal_wm_task.csv'
-    )
+    stop_trials = pd.concat([pd.read_csv(p) for p in stop_files], ignore_index=True)
+    wm_trials = pd.concat([pd.read_csv(p) for p in wm_files], ignore_index=True)
 
-    stop_trials = pd.read_csv(stop_trials_path)
-    wm_trials = pd.read_csv(wm_trials_path)
-
-    print(
-        f"Loaded {len(stop_trials)} trials from "
-        "all_participants_reshaped_data_stop_signal.csv"
-    )
-    print(
-        f"Loaded {len(wm_trials)} trials from "
-        "all_participants_reshaped_data_stop_signal_wm_task.csv"
-    )
+    print(f"Loaded {len(stop_trials)} trials from "
+          f"{[p.name for p in stop_files]}")
+    print(f"Loaded {len(wm_trials)} trials from "
+          f"{[p.name for p in wm_files]}")
 
     return stop_trials, wm_trials
 
@@ -313,9 +325,14 @@ def create_post_qc_datasets() -> None:
     print("=" * 80)
 
 
+def main() -> None:
+    """CLI entry-point."""
+    create_post_qc_datasets()
+
+
 # ============================================================================
 # Main
 # ============================================================================
 if __name__ == '__main__':
-    create_post_qc_datasets()
+    main()
 

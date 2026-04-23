@@ -30,9 +30,13 @@ dev = [
 ]
 
 [project.scripts]
+unpack-battery = "stop_wm.unpack_battery:main"
+approved-sync = "stop_wm.approved:main"
 preprocess = "stop_wm.serverExperimentalData:main"
 clean_shape = "stop_wm.clean_shape:main"
 subjectwise_metrics = "stop_wm.subjectwise_metrics:main"
+flag_to_exclude = "stop_wm.flag_to_exclude:main"
+create_post_qc_datasets = "stop_wm.create_post_qc_datasets:main"
 
 
 [build-system]

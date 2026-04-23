@@ -18,6 +18,14 @@ import pandas as pd
 from scipy import stats
 
 from stop_wm.config import ProjectConfig
+from stop_wm.subjectwise_metrics import WM_LOADS
+
+
+# Per-load derived column names. Defined once from WM_LOADS so that changing
+# the load grid in subjectwise_metrics propagates everywhere.
+BINOMIAL_METRICS = {'stop_fail_rate'} | {
+    f'dual_stop_fail_rate_wm{load}' for load in WM_LOADS
+}
 
 # ============================================================================
 # Functions
@@ -77,14 +85,12 @@ METRIC_NAME_MAPPING = {
     'completion_date': 'completion_date',
     # Binomial test thresholds for stop trials (derived metrics)
     'stop_fail_rate': 'stop_fail_rate',
-    'dual_stop_fail_rate_wm0': 'dual_stop_fail_rate_wm0',
-    'dual_stop_fail_rate_wm2': 'dual_stop_fail_rate_wm2',
-    'dual_stop_fail_rate_wm4': 'dual_stop_fail_rate_wm4',
-    # Level-specific memory accuracy metrics
-    'memory_accuracy_wm0': 'probe_wm0_response_accuracy',
-    'memory_accuracy_wm2': 'probe_wm2_response_accuracy',
-    'memory_accuracy_wm4': 'probe_wm4_response_accuracy',
 }
+# Per-load entries (both binomial stop-fail rates and memory accuracy) are
+# expanded from WM_LOADS so the load grid is defined in exactly one place.
+for _load in WM_LOADS:
+    METRIC_NAME_MAPPING[f'dual_stop_fail_rate_wm{_load}'] = f'dual_stop_fail_rate_wm{_load}'
+    METRIC_NAME_MAPPING[f'memory_accuracy_wm{_load}'] = f'probe_wm{_load}_response_accuracy'
 
 
 # This function calculates the binomial rate metrics for the exclusion checking.
@@ -102,23 +108,17 @@ def calculate_binomial_rates(df):
         DataFrame with added binomial rate columns for stop trials
     """
     df = df.copy()
-    
+
     # Stop trial failed inhibition rate (for stop signal task)
-    # Rate of responding when they should stop (1 - inhibition success rate)
     if 'stop_inhibition_success_rate' in df.columns:
         df['stop_fail_rate'] = 1 - df['stop_inhibition_success_rate']
-    
-    # Dual task stop trial failed inhibition rates by WM load
-    # (We don't use overall dual_stop_fail_rate, only the load-specific ones)
-    if 'dual_task_stop_wm0_inhibition_success_rate' in df.columns:
-        df['dual_stop_fail_rate_wm0'] = 1 - df['dual_task_stop_wm0_inhibition_success_rate']
-    
-    if 'dual_task_stop_wm2_inhibition_success_rate' in df.columns:
-        df['dual_stop_fail_rate_wm2'] = 1 - df['dual_task_stop_wm2_inhibition_success_rate']
-    
-    if 'dual_task_stop_wm4_inhibition_success_rate' in df.columns:
-        df['dual_stop_fail_rate_wm4'] = 1 - df['dual_task_stop_wm4_inhibition_success_rate']
-    
+
+    # Dual task per-load failed-inhibition rates (load-specific, not overall)
+    for load in WM_LOADS:
+        src = f'dual_task_stop_wm{load}_inhibition_success_rate'
+        if src in df.columns:
+            df[f'dual_stop_fail_rate_wm{load}'] = 1 - df[src]
+
     return df
 
 
@@ -135,12 +135,7 @@ def check_exclusion(row, criteria):
     reasons = []
     
     # Define binomial test metrics for special labeling
-    binomial_metrics = {
-        'stop_fail_rate', 
-        'dual_stop_fail_rate_wm0',
-        'dual_stop_fail_rate_wm2',
-        'dual_stop_fail_rate_wm4'
-    }
+    binomial_metrics = BINOMIAL_METRICS
     
     for metric, bounds in criteria.items():
         # Skip if metric not in row (e.g., WM-specific metrics in stop-only data)
@@ -205,32 +200,55 @@ def main():
         
         # Apply memory_accuracy criteria to each WM level
         if old_name == 'memory_accuracy':
-            for level in ['wm0', 'wm2', 'wm4']:
-                level_name = f'memory_accuracy_{level}'
+            for load in WM_LOADS:
+                level_name = f'memory_accuracy_wm{load}'
                 criteria[METRIC_NAME_MAPPING[level_name]] = bounds
     
     print(f"\nLoaded exclusion criteria from: {criteria_file}")
     print("\nCriteria:")
-    binomial_metrics = {
-        'stop_fail_rate', 
-        'dual_stop_fail_rate_wm0',
-        'dual_stop_fail_rate_wm2',
-        'dual_stop_fail_rate_wm4'
-    }
+    binomial_metrics = BINOMIAL_METRICS
     for metric, bounds in criteria.items():
         if metric in binomial_metrics:
             print(f"  {metric} [BINOMIAL TEST]: {bounds['min']} - {bounds['max']}")
         else:
             print(f"  {metric}: {bounds['min']} - {bounds['max']}")
     
-    # Load metrics
-    stop_signal_metrics = pd.read_csv(
-        config.results_dir / "stop_signal_metrics.csv"
+    # Discover metrics files: anything named <task>_metrics.csv (excluding
+    # already-flagged outputs and known derivative tables). Files with 'wm'
+    # in the task name are treated as WM-task metrics; the rest are simple
+    # stop-signal metrics. If multiple files match a category, concatenate.
+    metrics_files = [
+        p for p in sorted(config.results_dir.glob('*_metrics.csv'))
+        if '__flagged' not in p.name and 'post_qc' not in p.name
+    ]
+    if not metrics_files:
+        raise FileNotFoundError(
+            f'No *_metrics.csv files found in {config.results_dir}. '
+            f'Run `subjectwise_metrics` first.'
+        )
+
+    stop_files, wm_files = [], []
+    for p in metrics_files:
+        task_name = p.stem.replace('_metrics', '')
+        (wm_files if 'wm' in task_name.lower() else stop_files).append(p)
+
+    print(f"\nMetrics files discovered in {config.results_dir}:")
+    print(f"  stop-signal: {[p.name for p in stop_files] or '(none)'}")
+    print(f"  wm-task:     {[p.name for p in wm_files] or '(none)'}")
+
+    if not stop_files or not wm_files:
+        raise FileNotFoundError(
+            'Need at least one stop-signal metrics file and one WM metrics file; '
+            f'found stop={len(stop_files)}, wm={len(wm_files)}.'
+        )
+
+    stop_signal_metrics = pd.concat(
+        [pd.read_csv(p) for p in stop_files], ignore_index=True,
     )
-    stop_signal_wm_metrics = pd.read_csv(
-        config.results_dir / "stop_signal_wm_task_metrics.csv"
+    stop_signal_wm_metrics = pd.concat(
+        [pd.read_csv(p) for p in wm_files], ignore_index=True,
     )
-    
+
     # Calculate derived binomial rate metrics
     stop_signal_metrics = calculate_binomial_rates(stop_signal_metrics)
     stop_signal_wm_metrics = calculate_binomial_rates(stop_signal_wm_metrics)
@@ -351,12 +369,7 @@ def main():
     
     # Print counts by criterion for Stop Signal task
     print("\n### Stop Signal Task - Exclusions by Criterion ###")
-    binomial_metrics = {
-        'stop_fail_rate', 
-        'dual_stop_fail_rate_wm0',
-        'dual_stop_fail_rate_wm2',
-        'dual_stop_fail_rate_wm4'
-    }
+    binomial_metrics = BINOMIAL_METRICS
     for metric, count in sorted(stop_signal_criterion_counts.items()):
         if count > 0:
             if metric in binomial_metrics:

@@ -10,7 +10,9 @@ from stop_wm.config import ProjectConfig
 
 # Initialize configuration
 config = ProjectConfig()
-PREPROCESSED_DATA_DIR = config.preprocessed_data_dir
+# Prefer the reviewer-approved subset when it exists; otherwise process every
+# subject folder in preprocessed_data/.
+PREPROCESSED_DATA_DIR = config.active_preprocessed_dir()
 ANALYSIS_DIR = config.results_dir
 
 # ============================================================================
@@ -66,11 +68,13 @@ def reshape_trial_data(df):
     # Get columns to exclude from pivoting (identifiers that should be the same)
     id_cols = ['current_trial', 'block_num']
 
-    # Melt the data to long format first, then pivot
-    # Select only numeric/categorical columns that vary by trial type
+    # Melt the data to long format first, then pivot.
+    # Include every column that isn't an identifier — earlier versions filtered
+    # on dtype in {'object','int64','float64','bool'}, which silently drops
+    # pandas >=3.0 'str'/'string' columns (e.g. SS_trial_type), so we filter
+    # by name only.
     value_cols = [col for col in trial_data.columns
-                  if col not in id_cols + ['trial_id'] and
-                  trial_data[col].dtype in ['object', 'int64', 'float64', 'bool']]
+                  if col not in id_cols + ['trial_id']]
 
     # Melt the data
     melted = trial_data.melt(
@@ -109,6 +113,10 @@ def main():
 
     # Process each subject's folder individually
     for subject_dir in PREPROCESSED_DATA_DIR.iterdir():
+        # Skip the 'approved' curator subfolder when it sits alongside the
+        # canonical subject dirs (i.e. we're falling back to the full set).
+        if subject_dir.name == 'approved':
+            continue
         if subject_dir.is_dir():
             print(f"Processing subject: {subject_dir.name}")
 

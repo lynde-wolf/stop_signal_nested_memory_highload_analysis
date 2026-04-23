@@ -2,6 +2,24 @@
 
 For project overview, directory structure, pipeline, and conventions, see **README.md**.
 
+## Pipeline quick reference
+
+New server exports arrive as battery JSON files in `raw_data/` (`battery_<id>_<timestamp>.json`). Full run order:
+
+```bash
+unpack-battery                      # Step 1: battery JSON → per-subject CSVs in preprocessed_data/
+approved-sync <pid1> <pid2> ...     # Step 1.5: curate approved/ subset (symlinks)
+clean_shape                         # Step 2: reshape to trial-level, combine across subjects
+subjectwise_metrics                 # Step 3: participant-level metrics
+flag_to_exclude                     # Step 4: apply exclusion_criteria.txt → __flagged CSVs
+```
+
+`approved-sync` maintains `data/preprocessed_data/approved/<pid>` as symlinks to the canonical `data/preprocessed_data/<pid>`. The pipeline prefers `approved/` when non-empty (via `config.active_preprocessed_dir()`), so running `approved-sync` with each new reviewer list is enough to scope every downstream step. Default `approved-sync` is **replace** semantics — pass the full current list each batch. Use `--add` to only append.
+
+`unpack-battery` with no args processes all `battery_*.json` in `raw_data/`; pass a path to target one file. See README for the battery JSON schema and the per-file (`preprocess`) alternative.
+
+**Task-agnostic pipeline:** `clean_shape` and `subjectwise_metrics` both discover tasks from the filesystem — no exp_id is hardcoded. `clean_shape` produces one `all_participants_reshaped_data_<exp_name>.csv` per exp_name found in `data/preprocessed_data/<pid>/<exp_name>/`; `subjectwise_metrics` globs those and routes each to `calculate_wm_metrics` (if `'wm'` in name) or `calculate_stop_signal_metrics`. Output: `<exp_name>_metrics.csv`. Adding a new exp_id requires no code changes unless the `wm`-in-the-name heuristic fails for it.
+
 This file documents style and formatting instructions to follow when creating or editing notebooks in this project.
 
 ---

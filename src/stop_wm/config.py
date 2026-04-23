@@ -20,6 +20,7 @@ class ProjectConfig:
     project_root: Path = None
     results_dir: Path = None
     preprocessed_data_dir: Path = None
+    approved_data_dir: Path = None
     figures_dir: Path = None
 
     def __post_init__(self) -> None:
@@ -50,6 +51,9 @@ class ProjectConfig:
         if self.preprocessed_data_dir is None:
             self.preprocessed_data_dir = self.data_dir / 'preprocessed_data'
 
+        if self.approved_data_dir is None:
+            self.approved_data_dir = self.preprocessed_data_dir / 'approved'
+
         if self.figures_dir is None:
             self.figures_dir = self.data_dir / 'figures'
 
@@ -57,6 +61,21 @@ class ProjectConfig:
         self.results_dir.mkdir(parents=True, exist_ok=True)
         self.preprocessed_data_dir.mkdir(parents=True, exist_ok=True)
         self.figures_dir.mkdir(parents=True, exist_ok=True)
+
+    def active_preprocessed_dir(self) -> Path:
+        """Return approved/ if populated, else the full preprocessed_data_dir.
+
+        ``clean_shape`` and ``subjectwise_metrics`` call this so that once a
+        reviewer-approved set exists, the pipeline automatically restricts
+        itself to those subjects. If ``approved/`` is absent or empty, the
+        pipeline falls back to processing every subject folder.
+        """
+        approved = self.approved_data_dir
+        if approved and approved.exists():
+            entries = [p for p in approved.iterdir() if p.name != '.DS_Store']
+            if entries:
+                return approved
+        return self.preprocessed_data_dir
         # Note: raw_data_dir is intentionally not auto-created —
         # it is external data that must be downloaded separately.
 
