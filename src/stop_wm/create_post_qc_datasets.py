@@ -54,6 +54,17 @@ def load_metrics(results_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     stop_metrics = pd.concat([pd.read_csv(p) for p in stop_files], ignore_index=True)
     wm_metrics = pd.concat([pd.read_csv(p) for p in wm_files], ignore_index=True)
 
+    # A subject who completed the experiment under both the pilot exp_ids
+    # (stop_signal / stop_signal_wm_task) and the current E3 exp_ids will
+    # appear in both files. Keep only their most recent attempt per task.
+    def _dedupe_latest(df: pd.DataFrame) -> pd.DataFrame:
+        if 'completion_date' in df.columns:
+            df = df.sort_values('completion_date')
+        return df.drop_duplicates('prolific_id', keep='last').reset_index(drop=True)
+
+    stop_metrics = _dedupe_latest(stop_metrics)
+    wm_metrics = _dedupe_latest(wm_metrics)
+
     print(f"Loaded {len(stop_metrics)} subjects from "
           f"{[p.name for p in stop_files]}")
     print(f"Loaded {len(wm_metrics)} subjects from "
@@ -77,8 +88,32 @@ def load_trial_data(results_dir: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
             f'wm={[p.name for p in wm_files]}.'
         )
 
-    stop_trials = pd.concat([pd.read_csv(p) for p in stop_files], ignore_index=True)
-    wm_trials = pd.concat([pd.read_csv(p) for p in wm_files], ignore_index=True)
+    def _concat_with_source(files):
+        parts = []
+        for p in files:
+            df = pd.read_csv(p, low_memory=False)
+            df['_source_file'] = p.name
+            parts.append(df)
+        return pd.concat(parts, ignore_index=True)
+
+    stop_trials = _concat_with_source(stop_files)
+    wm_trials = _concat_with_source(wm_files)
+
+    # If a subject has trials from both the pilot exp_ids and the current E3
+    # exp_ids, keep only trials from their most-recent source file (E3
+    # filenames sort after the pilot files, so we keep the last group per
+    # participant_id).
+    def _dedupe_by_latest_source(df: pd.DataFrame) -> pd.DataFrame:
+        latest_source = (df.groupby('participant_id')['_source_file']
+                           .agg(lambda s: sorted(s.unique())[-1]))
+        keep_mask = df.apply(
+            lambda r: r['_source_file'] == latest_source[r['participant_id']],
+            axis=1,
+        )
+        return df[keep_mask].drop(columns='_source_file').reset_index(drop=True)
+
+    stop_trials = _dedupe_by_latest_source(stop_trials)
+    wm_trials = _dedupe_by_latest_source(wm_trials)
 
     print(f"Loaded {len(stop_trials)} trials from "
           f"{[p.name for p in stop_files]}")

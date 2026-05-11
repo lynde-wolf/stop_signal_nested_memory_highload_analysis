@@ -92,7 +92,11 @@ Rules:
 
 ### Within-subject confidence intervals
 
-The Cousineau (2005) + Morey (2008) within-subject CI function is defined in every notebook that produces visualizations. It is always the second numbered section. Use the canonical implementation from `analysis_notebook.ipynb` — do not simplify or modify it. Function signature: `calculate_within_subject_ci(data_matrix, confidence_level=0.95)`.
+The Cousineau (2005) + Morey (2008) within-subject CI function is imported from `stop_wm.within_subject_ci` in every notebook that produces visualizations. It is always the second numbered section (the markdown header documents the method; the code cell does the import). Do not redefine it inline or modify it. Function signature: `calculate_within_subject_ci(data_matrix, confidence_level=0.95)`.
+
+```python
+from stop_wm.within_subject_ci import calculate_within_subject_ci
+```
 
 ---
 
