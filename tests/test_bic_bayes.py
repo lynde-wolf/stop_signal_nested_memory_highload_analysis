@@ -1,9 +1,18 @@
-"""Tests for bic_bayes: calculate_bic, interpret_bic_delta, calculate_bf10."""
+"""Tests for bic_bayes: calculate_bic, interpret_bic_delta, calculate_bf10, calculate_bf01."""
 
 import numpy as np
 import pytest
 
-from stop_wm.bic_bayes import calculate_bic, calculate_bf10, interpret_bic_delta
+import pingouin as pg
+
+from stop_wm.bic_bayes import (
+    bf10_paired_difference_bic,
+    bf10_paired_jzs,
+    calculate_bic,
+    calculate_bf01,
+    calculate_bf10,
+    interpret_bic_delta,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +57,11 @@ class TestCalculateBic:
         """Input type flexibility — plain list should work."""
         result = calculate_bic([1.0, -1.0, 1.0, -1.0], n_params=2, n_obs=4)
         assert np.isfinite(result)
+
+    def test_zero_residuals_gives_negative_inf(self):
+        """Perfect fit (all residuals = 0) → RSS = 0 → log(0/n) = -inf → BIC = -inf (#15)."""
+        result = calculate_bic([0.0, 0.0, 0.0, 0.0], n_params=2, n_obs=4)
+        assert result == float('-inf')
 
 
 # ---------------------------------------------------------------------------
@@ -157,3 +171,128 @@ class TestCalculateBf10:
     def test_aligns_with_kass_raftery_thresholds(self, delta, expected_bf):
         """BF10 = exp(ΔBIC/2) at K&R boundary values matches the formula exactly."""
         assert pytest.approx(calculate_bf10(delta), rel=1e-6) == expected_bf
+
+
+# ---------------------------------------------------------------------------
+# calculate_bf01
+# ---------------------------------------------------------------------------
+
+class TestCalculateBf01:
+    """BF01 = exp(-ΔBIC / 2) = 1 / BF10."""
+
+    def test_zero_delta_gives_bf_one(self):
+        assert pytest.approx(calculate_bf01(0.0)) == 1.0
+
+    def test_positive_delta_gives_bf_below_one(self):
+        """Positive ΔBIC favours the full model → BF01 < 1."""
+        assert calculate_bf01(10.0) < 1.0
+
+    def test_negative_delta_gives_bf_above_one(self):
+        """Negative ΔBIC favours the null model → BF01 > 1."""
+        assert calculate_bf01(-10.0) > 1.0
+
+    def test_reciprocal_of_bf10(self):
+        for d in (-8.0, -2.0, 0.0, 3.5, 12.0):
+            assert pytest.approx(calculate_bf01(d) * calculate_bf10(d), rel=1e-10) == 1.0
+
+    def test_known_value(self):
+        """BF01 = exp(-6 / 2) = exp(-3) ≈ 0.0498."""
+        assert pytest.approx(calculate_bf01(6.0), rel=1e-6) == np.exp(-3.0)
+
+    def test_returns_float(self):
+        assert isinstance(calculate_bf01(5.0), float)
+
+
+# ---------------------------------------------------------------------------
+# bf10_paired_difference_bic
+# ---------------------------------------------------------------------------
+
+
+class TestBf10PairedDifferenceBic:
+    """Paired-difference BF₁₀ uses same BIC residual recipe as calculate_bic."""
+
+    def test_two_point_zero_mean_no_evidence_for_difference(self):
+        """d = [1, -1] → δ̂ = 0; H0 and H1 same RSS → ΔBIC < 0 → BF₁₀ < 1."""
+        bf10, delta = bf10_paired_difference_bic([1.0, -1.0])
+        assert delta < 0
+        assert bf10 < 1.0
+
+    def test_matches_manual_bic_difference(self):
+        """BF₁₀ equals exp((BIC0 - BIC1) / 2) from explicit calculate_bic calls."""
+        d = np.array([0.5, 1.0, -0.2, 0.8])
+        n = len(d)
+        bic0 = calculate_bic(d, n_params=1, n_obs=n)
+        bic1 = calculate_bic(d - d.mean(), n_params=2, n_obs=n)
+        bf10, delta = bf10_paired_difference_bic(d)
+        assert pytest.approx(delta, rel=1e-9) == bic0 - bic1
+        assert pytest.approx(bf10, rel=1e-9) == calculate_bf10(bic0 - bic1)
+
+    def test_clear_shift_favours_alternative(self):
+        """Large consistent shift should yield BF₁₀ > 1."""
+        d = np.ones(30) * 5.0 + np.random.default_rng(0).normal(0, 0.5, size=30)
+        bf10, _ = bf10_paired_difference_bic(d)
+        assert bf10 > 10.0
+
+    def test_fewer_than_two_observations_returns_nan(self):
+        bf10, delta = bf10_paired_difference_bic([1.0])
+        assert np.isnan(bf10) and np.isnan(delta)
+
+    def test_identical_differences_returns_inf(self):
+        """Perfect fit under H₁ → BIC_alt = -∞; function documents (inf, inf)."""
+        bf10, delta = bf10_paired_difference_bic([3.0, 3.0, 3.0])
+        assert bf10 == float('inf') and delta == float('inf')
+
+
+# ---------------------------------------------------------------------------
+# bf10_paired_jzs
+# ---------------------------------------------------------------------------
+
+
+class TestBf10PairedJzs:
+    """JZS (Rouder et al. 2009) paired-difference BF₁₀ via pingouin."""
+
+    def test_matches_pingouin_directly(self):
+        """Wrapper output should equal pingouin.bayesfactor_ttest applied to the same t."""
+        rng = np.random.default_rng(42)
+        d = rng.normal(0.5, 1.0, size=25)
+        n = len(d)
+        t_stat = d.mean() / (d.std(ddof=1) / np.sqrt(n))
+        expected = float(pg.bayesfactor_ttest(t_stat, nx=n, paired=True, r=0.707))
+        assert pytest.approx(bf10_paired_jzs(d), rel=1e-9) == expected
+
+    def test_clear_shift_favours_alternative(self):
+        rng = np.random.default_rng(0)
+        d = 5.0 + rng.normal(0, 0.5, size=30)
+        assert bf10_paired_jzs(d) > 10.0
+
+    def test_zero_mean_noise_favours_null(self):
+        rng = np.random.default_rng(1)
+        d = rng.normal(0, 1.0, size=30)
+        # Random noise around zero should yield BF₁₀ < 1 on average; this
+        # particular seed gives a small-mean draw that supports H₀.
+        assert bf10_paired_jzs(d) < 1.0
+
+    def test_fewer_than_two_observations_returns_nan(self):
+        assert np.isnan(bf10_paired_jzs([1.0]))
+        assert np.isnan(bf10_paired_jzs([]))
+
+    def test_nans_are_dropped(self):
+        with_nan = [1.0, 2.0, np.nan, 1.5]
+        without = [1.0, 2.0, 1.5]
+        assert pytest.approx(bf10_paired_jzs(with_nan), rel=1e-9) == bf10_paired_jzs(without)
+
+    def test_all_zero_differences_returns_one(self):
+        """Data perfectly consistent with H₀: BF₁₀ should be 1 (not inf)."""
+        assert bf10_paired_jzs([0.0, 0.0, 0.0, 0.0]) == 1.0
+
+    def test_nonzero_constant_differences_returns_inf(self):
+        """Zero variance with non-zero mean: BF₁₀ = inf."""
+        assert bf10_paired_jzs([3.0, 3.0, 3.0]) == float('inf')
+
+    def test_prior_scale_changes_result(self):
+        """Different r values should yield different BFs (no-op check)."""
+        rng = np.random.default_rng(7)
+        d = rng.normal(0.3, 1.0, size=20)
+        bf_med = bf10_paired_jzs(d, r=0.707)
+        bf_wide = bf10_paired_jzs(d, r=1.0)
+        assert bf_med != bf_wide

@@ -86,12 +86,13 @@ class TestKnownAnswer:
         var_expected = np.var([11.5, 12.5, 13.5, 14.5], ddof=1)
         sem = np.sqrt(var_expected / n)
         correction = np.sqrt(k / (k - 1))
-        t_crit = stats.t.ppf(0.975, df=n - 1)
+        # Morey (2008) within-subject error df: (n-1)(k-1)
+        t_crit = stats.t.ppf(0.975, df=(n - 1) * (k - 1))
         expected_ci = t_crit * sem * correction
 
         result = calculate_within_subject_ci(df)
 
-        np.testing.assert_allclose(result, [expected_ci, expected_ci], rtol=1e-6)
+        np.testing.assert_allclose(result.values, [expected_ci, expected_ci], rtol=1e-6)
 
 
 # ---------------------------------------------------------------------------
@@ -156,3 +157,36 @@ class TestEdgeCases:
             df = _make_matrix(raw)
             result = calculate_within_subject_ci(df)
             assert result.shape == (n_conds,)
+
+    def test_single_participant_returns_nan(self):
+        """With n=1, within-subject variance is undefined → NaN CIs + warning."""
+        df = _make_matrix([[10.0, 14.0]])
+        with pytest.warns(RuntimeWarning, match="Only 1 participant"):
+            result = calculate_within_subject_ci(df)
+        assert result.shape == (2,)
+        assert np.all(np.isnan(result))
+
+    def test_invalid_confidence_level_raises(self):
+        df = _make_matrix([[1.0, 2.0], [3.0, 4.0]])
+        for bad in [0.0, 1.0, -0.1, 1.5, 95]:
+            with pytest.raises(ValueError, match="confidence_level"):
+                calculate_within_subject_ci(df, confidence_level=bad)
+
+    def test_returns_series_with_column_index(self):
+        """Result is a pandas Series keyed by the original column labels."""
+        df = pd.DataFrame(
+            [[10.0, 14.0], [12.0, 14.0], [14.0, 14.0], [16.0, 14.0]],
+            columns=["load_2", "load_4"],
+        )
+        result = calculate_within_subject_ci(df)
+        assert isinstance(result, pd.Series)
+        assert list(result.index) == ["load_2", "load_4"]
+
+    def test_return_n_reports_complete_count(self):
+        df = _make_matrix([[10.0, 14.0],
+                           [12.0, 14.0],
+                           [np.nan, 14.0],
+                           [16.0, 14.0]])
+        result, n_used = calculate_within_subject_ci(df, return_n=True)
+        assert n_used == 3
+        assert result.shape == (2,)

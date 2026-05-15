@@ -11,13 +11,13 @@ from scipy.stats import ttest_rel
 
 # Set up paths and imports
 sys.path.insert(0, '/sessions/admiring-peaceful-darwin/mnt/working_memory_inhibition/experiment_1/src')
-from stop_wm.bic_bayes import calculate_bic, calculate_bf10, interpret_bic_delta
+from stop_wm.bic_bayes import calculate_bic, calculate_bf01, calculate_bf10, interpret_bic_delta
 
 # Load data
 metrics_data_wm = pd.read_csv('/sessions/admiring-peaceful-darwin/mnt/working_memory_inhibition/experiment_1/data/results/post_qc_stop_signal_wm_metrics.csv')
 
 print("="*90)
-print("COMPUTING MISSING BIC AND BF₁₀ VALUES FOR EXPERIMENT 1")
+print("COMPUTING MISSING BIC, BF₁₀, AND BF₀₁ VALUES FOR EXPERIMENT 1")
 print("="*90)
 
 def compute_bic_ttest_paired(group1, group2):
@@ -28,7 +28,7 @@ def compute_bic_ttest_paired(group1, group2):
     g2 = group2[mask]
     
     if len(g1) < 2:
-        return None, None, len(g1)
+        return None, None, None, len(g1)
     
     # Null: grand mean
     grand_mean = (np.mean(g1) + np.mean(g2)) / 2
@@ -42,8 +42,9 @@ def compute_bic_ttest_paired(group1, group2):
     bic_full = calculate_bic(residuals_full, n_params=2, n_obs=n_obs)
     delta_bic = bic_null - bic_full
     bf10 = calculate_bf10(delta_bic)
+    bf01 = calculate_bf01(delta_bic)
     
-    return delta_bic, bf10, len(g1)
+    return delta_bic, bf10, bf01, len(g1)
 
 def compute_bic_anova_3way(wm0, wm2, wm4):
     """Compute BIC for 3-way repeated measures ANOVA."""
@@ -54,7 +55,7 @@ def compute_bic_anova_3way(wm0, wm2, wm4):
     w4 = wm4[mask]
     
     if len(w0) < 2:
-        return None, None, len(w0)
+        return None, None, None, len(w0)
     
     # Null: grand mean
     grand_mean = (np.mean(w0) + np.mean(w2) + np.mean(w4)) / 3
@@ -72,8 +73,9 @@ def compute_bic_anova_3way(wm0, wm2, wm4):
     bic_full = calculate_bic(residuals_full, n_params=3, n_obs=n_obs)
     delta_bic = bic_null - bic_full
     bf10 = calculate_bf10(delta_bic)
+    bf01 = calculate_bf01(delta_bic)
     
-    return delta_bic, bf10, len(w0)
+    return delta_bic, bf10, bf01, len(w0)
 
 # ============================================================================
 # 1. GO TRIAL PERFORMANCE ANOVA (Accuracy and RT, 3-level WM load)
@@ -92,23 +94,23 @@ print(f"N = {len(complete_go)}")
 
 # 1a. Go Accuracy
 print("\n  Go Trial Accuracy:")
-delta_bic_go_acc, bf10_go_acc, n = compute_bic_anova_3way(
+delta_bic_go_acc, bf10_go_acc, bf01_go_acc, n = compute_bic_anova_3way(
     complete_go['dual_task_go_wm0_choice_accuracy'].values,
     complete_go['dual_task_go_wm2_choice_accuracy'].values,
     complete_go['dual_task_go_wm4_choice_accuracy'].values
 )
 if delta_bic_go_acc is not None:
-    print(f"    ΔBIC = {delta_bic_go_acc:.2f}, BF₁₀ = {bf10_go_acc:.2f}")
+    print(f"    ΔBIC = {delta_bic_go_acc:.2f}, BF₁₀ = {bf10_go_acc:.2f}, BF₀₁ = {bf01_go_acc:.2f}")
 
 # 1b. Go RT
 print("\n  Go Trial RT:")
-delta_bic_go_rt, bf10_go_rt, n = compute_bic_anova_3way(
+delta_bic_go_rt, bf10_go_rt, bf01_go_rt, n = compute_bic_anova_3way(
     complete_go['dual_task_go_wm0_mean_rt'].values,
     complete_go['dual_task_go_wm2_mean_rt'].values,
     complete_go['dual_task_go_wm4_mean_rt'].values
 )
 if delta_bic_go_rt is not None:
-    print(f"    ΔBIC = {delta_bic_go_rt:.2f}, BF₁₀ = {bf10_go_rt:.2f}")
+    print(f"    ΔBIC = {delta_bic_go_rt:.2f}, BF₁₀ = {bf10_go_rt:.2f}, BF₀₁ = {bf01_go_rt:.2f}")
 
 # ============================================================================
 # 2. PROBE ACCURACY ANOVA (3-level WM load)
@@ -124,13 +126,13 @@ complete_probe = metrics_data_wm.dropna(subset=[
 
 print(f"N = {len(complete_probe)}")
 
-delta_bic_probe_acc, bf10_probe_acc, n = compute_bic_anova_3way(
+delta_bic_probe_acc, bf10_probe_acc, bf01_probe_acc, n = compute_bic_anova_3way(
     complete_probe['probe_wm0_response_accuracy'].values,
     complete_probe['probe_wm2_response_accuracy'].values,
     complete_probe['probe_wm4_response_accuracy'].values
 )
 if delta_bic_probe_acc is not None:
-    print(f"  Probe Accuracy ANOVA: ΔBIC = {delta_bic_probe_acc:.2f}, BF₁₀ = {bf10_probe_acc:.2f}")
+    print(f"  Probe Accuracy ANOVA: ΔBIC = {delta_bic_probe_acc:.2f}, BF₁₀ = {bf10_probe_acc:.2f}, BF₀₁ = {bf01_probe_acc:.2f}")
 
 # ============================================================================
 # 3. PROBE ACCURACY BY STOP SIGNAL OUTCOME - t-tests
@@ -143,28 +145,28 @@ print("="*90)
 print("\n  Overall (all WM loads collapsed):")
 
 # Success vs Failed
-delta_bic, bf10, n = compute_bic_ttest_paired(
+delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
     metrics_data_wm['probe_accuracy_on_successful_stop'].values,
     metrics_data_wm['probe_accuracy_on_failed_stop'].values
 )
 if delta_bic is not None:
-    print(f"    Successful vs Failed: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+    print(f"    Successful vs Failed: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # Success vs Go
-delta_bic, bf10, n = compute_bic_ttest_paired(
+delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
     metrics_data_wm['probe_accuracy_on_successful_stop'].values,
     metrics_data_wm['probe_accuracy_on_go_trials'].values
 )
 if delta_bic is not None:
-    print(f"    Successful vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+    print(f"    Successful vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # Failed vs Go
-delta_bic, bf10, n = compute_bic_ttest_paired(
+delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
     metrics_data_wm['probe_accuracy_on_failed_stop'].values,
     metrics_data_wm['probe_accuracy_on_go_trials'].values
 )
 if delta_bic is not None:
-    print(f"    Failed vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+    print(f"    Failed vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # By WM Load
 for wm in [0, 2, 4]:
@@ -175,28 +177,28 @@ for wm in [0, 2, 4]:
     go_col = f'probe_wm{wm}_accuracy_on_go_trials'
     
     # Success vs Failed
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         metrics_data_wm[success_col].values,
         metrics_data_wm[failed_col].values
     )
     if delta_bic is not None:
-        print(f"    Successful vs Failed: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    Successful vs Failed: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
     
     # Success vs Go
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         metrics_data_wm[success_col].values,
         metrics_data_wm[go_col].values
     )
     if delta_bic is not None:
-        print(f"    Successful vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    Successful vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
     
     # Failed vs Go
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         metrics_data_wm[failed_col].values,
         metrics_data_wm[go_col].values
     )
     if delta_bic is not None:
-        print(f"    Failed vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    Failed vs Go: N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # ============================================================================
 # Now load trial-level data for sequential dependencies
@@ -267,11 +269,11 @@ for pid in stop_with_lag['participant_id'].unique():
 
 if subj_ssd:
     ssd_df = pd.DataFrame(subj_ssd)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         ssd_df['ssd_correct'].values, ssd_df['ssd_incorrect'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 4b. Commission-only stop success
 print("\n  Prior Commission Error → Stop Success:")
@@ -289,11 +291,11 @@ for pid in stop_commission['participant_id'].unique():
 
 if subj_stop_comm:
     stop_comm_df = pd.DataFrame(subj_stop_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         stop_comm_df['success_comm'].values, stop_comm_df['success_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # ============================================================================
 # 5. SEQUENTIAL DEPENDENCIES - Prior Probe Omission
@@ -319,11 +321,11 @@ for pid in probe_omission['participant_id'].unique():
 
 if subj_probe_rt:
     probe_rt_df = pd.DataFrame(subj_probe_rt)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         probe_rt_df['rt_omission'].values, probe_rt_df['rt_response'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 5b. Go Accuracy
 print("\n  Prior Probe Omission → Go Accuracy:")
@@ -341,11 +343,11 @@ for pid in go_omission['participant_id'].unique():
 
 if subj_go_acc:
     go_acc_df = pd.DataFrame(subj_go_acc)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         go_acc_df['acc_omission'].values, go_acc_df['acc_response'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 5c. Probe Commission Rate
 print("\n  Prior Probe Omission → Probe Commission Rate:")
@@ -370,11 +372,11 @@ for pid in probe_for_comm['participant_id'].unique():
 
 if subj_probe_comm:
     probe_comm_df = pd.DataFrame(subj_probe_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         probe_comm_df['comm_omission'].values, probe_comm_df['comm_response'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # ============================================================================
 # 6. SEQUENTIAL DEPENDENCIES - Prior Commission Error
@@ -399,11 +401,11 @@ for pid in stop_comm_lag['participant_id'].unique():
 
 if subj_stop_comm_lag:
     stop_comm_lag_df = pd.DataFrame(subj_stop_comm_lag)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         stop_comm_lag_df['success_comm'].values, stop_comm_lag_df['success_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6b. Probe RT
 print("\n  Prior Commission Error → Probe RT:")
@@ -422,11 +424,11 @@ for pid in probe_comm_lag['participant_id'].unique():
 
 if subj_probe_rt_comm:
     probe_rt_comm_df = pd.DataFrame(subj_probe_rt_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         probe_rt_comm_df['rt_comm'].values, probe_rt_comm_df['rt_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6c. Go RT
 print("\n  Prior Commission Error → Go RT:")
@@ -445,11 +447,11 @@ for pid in go_comm_lag['participant_id'].unique():
 
 if subj_go_rt_comm:
     go_rt_comm_df = pd.DataFrame(subj_go_rt_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         go_rt_comm_df['rt_comm'].values, go_rt_comm_df['rt_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6d. SSD
 print("\n  Prior Commission Error → SSD:")
@@ -467,11 +469,11 @@ for pid in stop_ssd_comm['participant_id'].unique():
 
 if subj_ssd_comm:
     ssd_comm_df = pd.DataFrame(subj_ssd_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         ssd_comm_df['ssd_comm'].values, ssd_comm_df['ssd_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6e. Go Accuracy
 print("\n  Prior Commission Error → Go Accuracy:")
@@ -489,11 +491,11 @@ for pid in go_acc_comm['participant_id'].unique():
 
 if subj_go_acc_comm:
     go_acc_comm_df = pd.DataFrame(subj_go_acc_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         go_acc_comm_df['acc_comm'].values, go_acc_comm_df['acc_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6f. Go Omission Rate
 print("\n  Prior Commission Error → Go Omission Rate:")
@@ -523,11 +525,11 @@ for pid in go_omiss_comm['participant_id'].unique():
 
 if subj_go_omiss_comm:
     go_omiss_comm_df = pd.DataFrame(subj_go_omiss_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         go_omiss_comm_df['omiss_comm'].values, go_omiss_comm_df['omiss_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6g. Probe Omission Rate
 print("\n  Prior Commission Error → Probe Omission Rate:")
@@ -545,11 +547,11 @@ for pid in probe_omiss_comm['participant_id'].unique():
 
 if subj_probe_omiss_comm:
     probe_omiss_comm_df = pd.DataFrame(subj_probe_omiss_comm)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         probe_omiss_comm_df['omiss_comm'].values, probe_omiss_comm_df['omiss_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 # 6h. Probe Commission Rate
 print("\n  Prior Commission Error → Probe Commission Rate:")
@@ -574,11 +576,11 @@ for pid in probe_comm_rate['participant_id'].unique():
 
 if subj_probe_comm_rate:
     probe_comm_rate_df = pd.DataFrame(subj_probe_comm_rate)
-    delta_bic, bf10, n = compute_bic_ttest_paired(
+    delta_bic, bf10, bf01, n = compute_bic_ttest_paired(
         probe_comm_rate_df['comm_after_comm'].values, probe_comm_rate_df['comm_after_correct'].values
     )
     if delta_bic is not None:
-        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}")
+        print(f"    N={n}, ΔBIC = {delta_bic:.2f}, BF₁₀ = {bf10:.2f}, BF₀₁ = {bf01:.2f}")
 
 print("\n" + "="*90)
 print("COMPUTATION COMPLETE")
